@@ -19,45 +19,115 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Initialize Leaflet map centered on Hong Kong
-        var map = L.map('map').setView([22.3193, 114.1694], 11);
+        // Helper: Calculate distance between two lat/lon points (Haversine formula)
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // metres
+            const toRad = deg => deg * Math.PI / 180;
+            const φ1 = toRad(lat1);
+            const φ2 = toRad(lat2);
+            const Δφ = toRad(lat2 - lat1);
+            const Δλ = toRad(lon2 - lon1);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19
-        }).addTo(map);
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-        // Function to add markers with popup text "地點 Venue"
-        function addMarkers(points) {
-            points.forEach(point => {
-                const popupText = `${point.地點} ${point.Venue}`;
-                L.marker([point.lat, point.lon])
-                    .addTo(map)
-                    .bindPopup(popupText);
-            });
+            return R * c; // in meters
         }
 
-        // Fetch data and preprocess
-        fetch('https://api.csdi.gov.hk/apim/dataquery/api/?id=had_rcd_1635393119641_62162&layer=bffchcc&limit=500&offset=0')
-            .then(response => response.json())
-            .then(data => {
-                const features = data.features || [];
+        // Main async function
+        async function initMap() {
+            try {
+                // 1. Fetch initial center location from Supabase API
+                const locResponse = await fetch('https://ovvmyienbhkptqqosooy.supabase.co/rest/v1/LocationHandler', {
+                    headers: {
+                        'Accept': 'application/json',
+                        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92dm15aWVuYmhrcHRxcW9zb295Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwODgxNjQsImV4cCI6MjA2NDY2NDE2NH0.xhxVnoCLoOdHPOTstxu1SGYqjsKqI2UVyBaEk0bpNxI'
+                    }
+                });
 
-                // Extract coordinates, 地點, Venue for each feature
-                const points = features.map(feature => {
-                    const coords = feature.geometry.coordinates; // [lon, lat]
-                    const props = feature.properties;
+                const locData = await locResponse.json();
+                const initialLoc = locData[0];
+
+                // Use lat and long directly if decimals
+                const initialLat = parseFloat(initialLoc.lat);
+                const initialLon = parseFloat(initialLoc.long);
+
+                if (isNaN(initialLat) || isNaN(initialLon)) {
+                    throw new Error('Invalid lat/lon values');
+                }
+
+                // Initialize map centered at the fetched coordinates
+                const map = L.map('map').setView([initialLat, initialLon], 14);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19
+                }).addTo(map);
+
+                // Define custom icons with bigger sizes and different colors
+                const greenIcon = new L.Icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                    iconSize: [40, 65],       // bigger size (default is [25, 41])
+                    iconAnchor: [20, 65],     // adjusted anchor (half width, full height)
+                    popupAnchor: [1, -50],    // popup position relative to icon
+                    shadowSize: [50, 50]
+                });
+
+                const blueIcon = new L.Icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                    iconSize: [40, 65],
+                    iconAnchor: [20, 65],
+                    popupAnchor: [1, -50],
+                    shadowSize: [50, 50]
+                });
+
+                // 3. Fetch community halls data from your API
+                const hallsResponse = await fetch('https://api.csdi.gov.hk/apim/dataquery/api/?id=had_rcd_1635393119641_62162&layer=bffchcc&limit=500&offset=0');
+                if (!hallsResponse.ok) throw new Error('Failed to fetch community hall data');
+
+                const hallData = await hallsResponse.json();
+                const features = hallData.features || [];
+
+                // 4. Preprocess: extract lat, lon, 地點, Venue and calculate distance to initial location
+                const points = features.map(f => {
+                    const coords = f.geometry.coordinates; // [lon, lat]
+                    const props = f.properties;
+
+                    const lat = coords[1];
+                    const lon = coords[0];
+                    const dist = getDistance(initialLat, initialLon, lat, lon);
+
                     return {
-                        lat: coords[1],
-                        lon: coords[0],
+                        lat,
+                        lon,
                         地點: props['地點'] || '未知地點',
-                        Venue: props['Venue'] || 'Unknown Venue'
+                        Venue: props['Venue'] || 'Unknown Venue',
+                        distance: dist
                     };
                 });
 
-                // Add markers to map
-                addMarkers(points);
-            })
-            .catch(error => console.error('Error fetching or processing data:', error));
+                // 5. Sort points by distance ascending
+                points.sort((a, b) => a.distance - b.distance);
+
+                // 6. Add markers: first 3 nearest in light green, others in dull blue
+                points.forEach((p, index) => {
+                    const icon = index < 3 ? greenIcon : blueIcon;
+                    const popupText = `${p.地點} ${p.Venue}`;
+                    L.marker([p.lat, p.lon], { icon })
+                        .addTo(map)
+                        .bindPopup(popupText);
+                });
+            } catch (error) {
+                console.error('Error initializing map:', error);
+                alert('Failed to load map data. See console for details.');
+            }
+        }
+
+        // Run the main function
+        initMap();
     </script>
 </body>
 
