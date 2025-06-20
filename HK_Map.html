@@ -2,146 +2,181 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8" />
-  <title>Hong Kong Interactive Map with Leaflet</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    #map {
-      width: 100%;
-      height: 600px;
-    }
-  </style>
+    <meta charset="UTF-8" />
+    <title>Hong Kong Interactive Map with Leaflet</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
 </head>
 
 <body>
-  <h1>Hong Kong Interactive Map</h1>
-  <div id="map"></div>
+    <h1>Hong Kong Interactive Map</h1>
+    <div id="map"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    // Helper: Calculate distance between two lat/lon points (Haversine formula)
-    function getDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371e3; // metres
-      const toRad = deg => deg * Math.PI / 180;
-      const φ1 = toRad(lat1);
-      const φ2 = toRad(lat2);
-      const Δφ = toRad(lat2 - lat1);
-      const Δλ = toRad(lon2 - lon1);
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const SUPABASE_URL = 'https://ovvmyienbhkptqqosooy.supabase.co/rest/v1';
+        const SUPABASE_APIKEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92dm15aWVuYmhrcHRxcW9zb295Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwODgxNjQsImV4cCI6MjA2NDY2NDE2NH0.xhxVnoCLoOdHPOTstxu1SGYqjsKqI2UVyBaEk0bpNxI';
 
-      const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-        Math.cos(φ1) * Math.cos(φ2) *
-        Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        // Helper: Calculate distance between two lat/lon points (Haversine formula)
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // metres
+            const toRad = deg => deg * Math.PI / 180;
+            const φ1 = toRad(lat1);
+            const φ2 = toRad(lat2);
+            const Δφ = toRad(lat2 - lat1);
+            const Δλ = toRad(lon2 - lon1);
 
-      return R * c; // in meters
-    }
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    async function initMap() {
-      try {
-        // 1. Fetch initial center location from Supabase API
-        const locResponse = await fetch('https://ovvmyienbhkptqqosooy.supabase.co/rest/v1/LocationHandler', {
-          headers: {
-            'Accept': 'application/json',
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92dm15aWVuYmhrcHRxcW9zb295Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwODgxNjQsImV4cCI6MjA2NDY2NDE2NH0.xhxVnoCLoOdHPOTstxu1SGYqjsKqI2UVyBaEk0bpNxI'
-          }
-        });
-
-        const locData = await locResponse.json();
-        const initialLoc = locData[0];
-
-        // Use lat and long directly if decimals
-        const initialLat = parseFloat(initialLoc.lat);
-        const initialLon = parseFloat(initialLoc.long);
-
-        if (isNaN(initialLat) || isNaN(initialLon)) {
-          throw new Error('Invalid lat/lon values');
+            return R * c; // in meters
         }
 
-        // 2. Initialize map centered at the fetched coordinates
-        const map = L.map('map').setView([initialLat, initialLon], 14);
+        async function updateNearestCommunityHall(nearestId, venueName) {
+            try {
+                const url = `${SUPABASE_URL}/NearestCommunityHalls?Nearest=eq.${nearestId}`;
+                const response = await fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                        'apikey': SUPABASE_APIKEY,
+                        'Content-Type': 'application/json',
+                        'Prefer': 'return=representation' // optional: get updated record back
+                    },
+                    body: JSON.stringify({
+                        "Nearest": nearestId, 
+                        "Venue": venueName }),
+                });
+                if (!response.ok) {
+                    console.error(`Failed to update nearest=${nearestId}`, await response.text());
+                } else {
+                    const data = await response.json();
+                    console.log(`Updated nearest=${nearestId} with name="${venueName}"`, data);
+                }
+            } catch (error) {
+                console.error(`Error updating nearest=${nearestId}`, error);
+            }
+        }
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19
-        }).addTo(map);
+        async function initMap() {
+            try {
+                // 1. Fetch initial center location from Supabase API
+                const locResponse = await fetch(`${SUPABASE_URL}/LocationHandler`, {
+                    headers: {
+                        'Accept': 'application/json',
+                        'apikey': SUPABASE_APIKEY,
+                        'Authorization': `Bearer ${SUPABASE_APIKEY}`
+                    }
+                });
 
-        // 3. Yellow icon for "You are here" marker (with popup open by default)
-        const yellowIcon = new L.Icon({
-          iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-yellow.png',
-          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-          popupAnchor: [1, -34],
-          shadowSize: [41, 41]
-        });
+                const locData = await locResponse.json();
+                const initialLoc = locData[0];
 
-        const youAreHereMarker = L.marker([initialLat, initialLon], { icon: yellowIcon }).addTo(map);
-        youAreHereMarker.bindPopup("你在此 You are here").openPopup();
+                const initialLat = parseFloat(initialLoc.lat);
+                const initialLon = parseFloat(initialLoc.long);
 
-        // 4. Define green and blue icons for community halls
-        const greenIcon = new L.Icon({
-          iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
-          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-          iconSize: [40, 65],
-          iconAnchor: [20, 65],
-          popupAnchor: [1, -50],
-          shadowSize: [50, 50]
-        });
+                if (isNaN(initialLat) || isNaN(initialLon)) {
+                    throw new Error('Invalid lat/lon values');
+                }
 
-        const blueIcon = new L.Icon({
-          iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
-          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-          iconSize: [40, 65],
-          iconAnchor: [20, 65],
-          popupAnchor: [1, -50],
-          shadowSize: [50, 50]
-        });
+                // 2. Initialize map centered at the fetched coordinates
+                const map = L.map('map').setView([initialLat, initialLon], 14);
 
-        // 5. Fetch community halls data from your API
-        const hallsResponse = await fetch('https://api.csdi.gov.hk/apim/dataquery/api/?id=had_rcd_1635393119641_62162&layer=bffchcc&limit=500&offset=0');
-        if (!hallsResponse.ok) throw new Error('Failed to fetch community hall data');
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19
+                }).addTo(map);
 
-        const hallData = await hallsResponse.json();
-        const features = hallData.features || [];
+                // 3. Yellow icon for "You are here" marker (with popup open by default)
+                const yellowIcon = new L.Icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-yellow.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                    iconSize: [25, 41],
+                    iconAnchor: [12, 41],
+                    popupAnchor: [1, -34],
+                    shadowSize: [41, 41]
+                });
 
-        // 6. Extract lat, lon, 地點, Venue and distance to initial location
-        const points = features.map(f => {
-          const coords = f.geometry.coordinates; // [lon, lat]
-          const props = f.properties;
+                const youAreHereMarker = L.marker([initialLat, initialLon], { icon: yellowIcon }).addTo(map);
+                youAreHereMarker.bindPopup("你在此 You are here").openPopup();
 
-          const lat = coords[1];
-          const lon = coords[0];
-          const dist = getDistance(initialLat, initialLon, lat, lon);
+                // 4. Define green and blue icons for community halls
+                const greenIcon = new L.Icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                    iconSize: [40, 65],
+                    iconAnchor: [20, 65],
+                    popupAnchor: [1, -50],
+                    shadowSize: [50, 50]
+                });
 
-          return {
-            lat,
-            lon,
-            地點: props['地點'] || '未知地點',
-            Venue: props['Venue'] || 'Unknown Venue',
-            distance: dist
-          };
-        });
+                const blueIcon = new L.Icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                    iconSize: [40, 65],
+                    iconAnchor: [20, 65],
+                    popupAnchor: [1, -50],
+                    shadowSize: [50, 50]
+                });
 
-        // 7. Sort points by distance ascending
-        points.sort((a, b) => a.distance - b.distance);
+                // 5. Fetch community halls data from your API
+                const hallsResponse = await fetch('https://api.csdi.gov.hk/apim/dataquery/api/?id=had_rcd_1635393119641_62162&layer=bffchcc&limit=500&offset=0');
+                if (!hallsResponse.ok) throw new Error('Failed to fetch community hall data');
 
-        // 8. Add markers with popups (none open by default except "You are here")
-        points.forEach((p, index) => {
-          const icon = index < 3 ? greenIcon : blueIcon;
-          const label = `${p.地點} ${p.Venue}`;
+                const hallData = await hallsResponse.json();
+                const features = hallData.features || [];
 
-          const marker = L.marker([p.lat, p.lon], { icon }).addTo(map);
-          marker.bindPopup(label);
-        });
+                // 6. Extract lat, lon, 地點, Venue and distance to initial location
+                const points = features.map(f => {
+                    const coords = f.geometry.coordinates; // [lon, lat]
+                    const props = f.properties;
 
-      } catch (error) {
-        console.error('Error initializing map:', error);
-        alert('Failed to load map data. See console for details.');
-      }
-    }
+                    const lat = coords[1];
+                    const lon = coords[0];
+                    const dist = getDistance(initialLat, initialLon, lat, lon);
 
-    // Run the main function
-    initMap();
-  </script>
+                    return {
+                        lat,
+                        lon,
+                        地點: props['地點'] || '未知地點',
+                        Venue: props['Venue'] || 'Unknown Venue',
+                        distance: dist
+                    };
+                });
+
+                // 7. Sort points by distance ascending
+                points.sort((a, b) => a.distance - b.distance);
+
+                // 8. Add markers with popups (only "You are here" popup open by default)
+                points.forEach((p, index) => {
+                    const icon = index < 3 ? greenIcon : blueIcon;
+                    const label = `${p.地點} ${p.Venue}`;
+
+                    const marker = L.marker([p.lat, p.lon], { icon }).addTo(map);
+                    marker.bindPopup(label);
+                });
+
+                // 9. Update Supabase table for the 3 nearest community halls
+                for (let i = 0; i < 3 && i < points.length; i++) {
+                    const nearestId = i + 1; // 1, 2, 3
+                    const venueName = points[i].Venue;
+                    await updateNearestCommunityHall(nearestId, venueName);
+                }
+
+            } catch (error) {
+                console.error('Error initializing map:', error);
+                alert('Failed to load map data. See console for details.');
+            }
+        }
+
+        // Run the main function
+        initMap();
+    </script>
 </body>
 
 </html>
